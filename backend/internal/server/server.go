@@ -11,14 +11,15 @@ import (
 	"mime"
 	"net/http"
 	"net/mail"
-	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"uptime-backend/internal/auth"
 	"uptime-backend/internal/config"
+	"uptime-backend/internal/monitor"
 	"uptime-backend/internal/user"
 )
 
@@ -29,6 +30,7 @@ const (
 
 type api struct {
 	repository      user.Repository
+	monitors        monitor.Repository
 	tokens          *auth.Manager
 	refreshTokenTTL time.Duration
 	now             func() time.Time
@@ -74,9 +76,12 @@ type publicMonitor struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-func New(cfg config.Config, repository user.Repository) (http.Handler, error) {
+func New(cfg config.Config, repository user.Repository, monitors monitor.Repository) (http.Handler, error) {
 	if repository == nil {
 		return nil, errors.New("user repository is required")
+	}
+	if monitors == nil {
+		return nil, errors.New("monitor repository is required")
 	}
 	tokens, err := auth.NewManager(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	if err != nil {
@@ -88,7 +93,7 @@ func New(cfg config.Config, repository user.Repository) (http.Handler, error) {
 	if err := os.MkdirAll(cfg.AvatarDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create avatar directory: %w", err)
 	}
-	api := &api{repository: repository, tokens: tokens, refreshTokenTTL: cfg.RefreshTokenTTL, now: time.Now, avatarDir: cfg.AvatarDir}
+	api := &api{repository: repository, monitors: monitors, tokens: tokens, refreshTokenTTL: cfg.RefreshTokenTTL, now: time.Now, avatarDir: cfg.AvatarDir}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/register", api.register)
 	mux.HandleFunc("POST /api/auth/login", api.login)
@@ -110,16 +115,31 @@ func (a *api) listMonitors(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	monitors, err := a.repository.ListMonitorsByUserID(r.Context(), account.ID)
+	limit, cursor, ok := decodeMonitorPage(w, r)
+	if !ok {
+		return
+	}
+	monitors, err := a.monitors.ListMonitorsByUserID(r.Context(), account.ID, limit+1, cursor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "could not load monitors")
 		return
 	}
-	public := make([]publicMonitor, len(monitors))
-	for i, monitor := range monitors {
-		public[i] = publicMonitorFrom(monitor)
+	hasMore := len(monitors) > limit
+	if hasMore {
+		monitors = monitors[:limit]
 	}
-	writeJSON(w, http.StatusOK, map[string][]publicMonitor{"monitors": public})
+	public := make([]publicMonitor, len(monitors))
+	for i, entry := range monitors {
+		public[i] = publicMonitorFrom(entry)
+	}
+	response := struct {
+		Monitors   []publicMonitor `json:"monitors"`
+		NextCursor string          `json:"next_cursor,omitempty"`
+	}{Monitors: public}
+	if hasMore {
+		response.NextCursor = encodeMonitorCursor(monitors[len(monitors)-1])
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
@@ -136,12 +156,16 @@ func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "could not create monitor")
 		return
 	}
-	monitor := user.Monitor{ID: id, UserID: account.ID, TargetURL: request.URL, IntervalSeconds: request.IntervalSeconds, CreatedAt: a.now().UTC()}
-	if err := a.repository.CreateMonitor(r.Context(), monitor); err != nil {
+	entry := monitor.Monitor{ID: id, UserID: account.ID, TargetURL: request.URL, IntervalSeconds: request.IntervalSeconds, CreatedAt: a.now().UTC()}
+	if err := a.monitors.CreateMonitor(r.Context(), entry); err != nil {
+		if errors.Is(err, monitor.ErrLimitReached) {
+			writeError(w, http.StatusTooManyRequests, "monitor_limit_reached", "monitor limit has been reached")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "could not create monitor")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]publicMonitor{"monitor": publicMonitorFrom(monitor)})
+	writeJSON(w, http.StatusCreated, map[string]publicMonitor{"monitor": publicMonitorFrom(entry)})
 }
 
 func (a *api) register(w http.ResponseWriter, r *http.Request) {
@@ -481,17 +505,48 @@ func decodeMonitor(w http.ResponseWriter, r *http.Request) (monitorRequest, bool
 	if !decodeJSON(w, r, &request) {
 		return monitorRequest{}, false
 	}
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(request.URL))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-		writeError(w, http.StatusBadRequest, "invalid_url", "url must be an absolute HTTP or HTTPS URL")
+	targetURL, err := monitor.ValidateTargetURL(request.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_url", err.Error())
 		return monitorRequest{}, false
 	}
 	if request.IntervalSeconds != 5 && request.IntervalSeconds != 60 && request.IntervalSeconds != 3600 {
 		writeError(w, http.StatusBadRequest, "invalid_interval", "interval_seconds must be 5, 60, or 3600")
 		return monitorRequest{}, false
 	}
-	request.URL = parsed.String()
+	request.URL = targetURL
 	return request, true
+}
+
+func decodeMonitorPage(w http.ResponseWriter, r *http.Request) (int, *monitor.Cursor, bool) {
+	limit := monitor.DefaultPageSize
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > monitor.MaxPageSize {
+			writeError(w, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 100")
+			return 0, nil, false
+		}
+		limit = parsed
+	}
+	value := r.URL.Query().Get("cursor")
+	if value == "" {
+		return limit, nil, true
+	}
+	createdAtValue, id, found := strings.Cut(value, "|")
+	if !found {
+		writeError(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid")
+		return 0, nil, false
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, createdAtValue)
+	if err != nil || id == "" {
+		writeError(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid")
+		return 0, nil, false
+	}
+	return limit, &monitor.Cursor{CreatedAt: createdAt, ID: id}, true
+}
+
+func encodeMonitorCursor(entry monitor.Monitor) string {
+	return entry.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + entry.ID
 }
 
 func publicProfileFrom(profile user.Profile) publicProfile {
@@ -502,8 +557,8 @@ func publicProfileFrom(profile user.Profile) publicProfile {
 	return publicProfile{Name: profile.Name, AvatarURL: avatarURL, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}
 }
 
-func publicMonitorFrom(monitor user.Monitor) publicMonitor {
-	return publicMonitor{ID: monitor.ID, URL: monitor.TargetURL, IntervalSeconds: monitor.IntervalSeconds, CreatedAt: monitor.CreatedAt}
+func publicMonitorFrom(entry monitor.Monitor) publicMonitor {
+	return publicMonitor{ID: entry.ID, URL: entry.TargetURL, IntervalSeconds: entry.IntervalSeconds, CreatedAt: entry.CreatedAt}
 }
 
 func (a *api) newSession(account user.User) (auth.TokenPair, user.Session, error) {

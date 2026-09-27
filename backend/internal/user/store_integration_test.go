@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"uptime-backend/internal/database"
+	"uptime-backend/internal/monitor"
 )
 
 func TestStorePersistsUsersAndRefreshSessionLifecycle(t *testing.T) {
@@ -55,5 +56,21 @@ func TestStorePersistsUsersAndRefreshSessionLifecycle(t *testing.T) {
 	}
 	if err := store.RevokeSession(ctx, session.ID, account.ID, rotated.RefreshJTIHash); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("RevokeSession() after replay error = %v", err)
+	}
+	first := monitor.Monitor{ID: "monitor-1-" + stamp, UserID: account.ID, TargetURL: "https://example.com", IntervalSeconds: 60, CreatedAt: time.Now().UTC()}
+	second := monitor.Monitor{ID: "monitor-2-" + stamp, UserID: account.ID, TargetURL: "https://example.org", IntervalSeconds: 5, CreatedAt: first.CreatedAt.Add(time.Second)}
+	if err := store.CreateMonitor(ctx, first); err != nil {
+		t.Fatalf("CreateMonitor(first) error = %v", err)
+	}
+	if err := store.CreateMonitor(ctx, second); err != nil {
+		t.Fatalf("CreateMonitor(second) error = %v", err)
+	}
+	monitors, err := store.ListMonitorsByUserID(ctx, account.ID, 1, nil)
+	if err != nil || len(monitors) != 1 || monitors[0].ID != second.ID {
+		t.Fatalf("ListMonitorsByUserID() = %#v, %v", monitors, err)
+	}
+	page, err := store.ListMonitorsByUserID(ctx, account.ID, 1, &monitor.Cursor{CreatedAt: monitors[0].CreatedAt, ID: monitors[0].ID})
+	if err != nil || len(page) != 1 || page[0].ID != first.ID {
+		t.Fatalf("ListMonitorsByUserID(cursor) = %#v, %v", page, err)
 	}
 }

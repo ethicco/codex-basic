@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"uptime-backend/internal/config"
+	"uptime-backend/internal/monitor"
 	"uptime-backend/internal/user"
 )
 
@@ -31,11 +32,11 @@ type memoryRepository struct {
 	sessions map[string]user.Session
 	revoked  map[string]bool
 	profiles map[string]user.Profile
-	monitors map[string][]user.Monitor
+	monitors map[string][]monitor.Monitor
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{users: map[string]user.User{}, sessions: map[string]user.Session{}, revoked: map[string]bool{}, profiles: map[string]user.Profile{}, monitors: map[string][]user.Monitor{}}
+	return &memoryRepository{users: map[string]user.User{}, sessions: map[string]user.Session{}, revoked: map[string]bool{}, profiles: map[string]user.Profile{}, monitors: map[string][]monitor.Monitor{}}
 }
 
 func (r *memoryRepository) CreateUserWithSession(_ context.Context, account user.User, session user.Session) error {
@@ -120,16 +121,31 @@ func (r *memoryRepository) UpdateProfileAvatar(_ context.Context, userID, avatar
 	r.profiles[userID] = profile
 	return profile, nil
 }
-func (r *memoryRepository) CreateMonitor(_ context.Context, monitor user.Monitor) error {
+func (r *memoryRepository) CreateMonitor(_ context.Context, entry monitor.Monitor) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.monitors[monitor.UserID] = append([]user.Monitor{monitor}, r.monitors[monitor.UserID]...)
+	if len(r.monitors[entry.UserID]) >= monitor.MaxPerUser {
+		return monitor.ErrLimitReached
+	}
+	r.monitors[entry.UserID] = append([]monitor.Monitor{entry}, r.monitors[entry.UserID]...)
 	return nil
 }
-func (r *memoryRepository) ListMonitorsByUserID(_ context.Context, userID string) ([]user.Monitor, error) {
+func (r *memoryRepository) ListMonitorsByUserID(_ context.Context, userID string, limit int, cursor *monitor.Cursor) ([]monitor.Monitor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]user.Monitor(nil), r.monitors[userID]...), nil
+	entries := append([]monitor.Monitor(nil), r.monitors[userID]...)
+	if cursor != nil {
+		for index, entry := range entries {
+			if entry.CreatedAt.Before(cursor.CreatedAt) || (entry.CreatedAt.Equal(cursor.CreatedAt) && entry.ID < cursor.ID) {
+				entries = entries[index:]
+				break
+			}
+		}
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries, nil
 }
 
 func TestAuthenticationFlow(t *testing.T) {
@@ -310,12 +326,37 @@ func TestMonitorValidation(t *testing.T) {
 	for _, request := range []map[string]any{
 		{"url": "example.com", "interval_seconds": 60},
 		{"url": "ftp://example.com", "interval_seconds": 60},
+		{"url": "http://127.0.0.1", "interval_seconds": 60},
 		{"url": "https://example.com", "interval_seconds": 30},
 	} {
 		response := callJSONWithAccessToken(t, handler, http.MethodPost, "/api/monitors", payload.AccessToken, request)
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("invalid monitor status = %d, body = %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestMonitorListDoesNotExposeOtherUsersData(t *testing.T) {
+	handler := newTestHandler(t)
+	first := callJSON(t, handler, http.MethodPost, "/api/auth/register", map[string]string{"email": "first@example.com", "password": "a sufficiently long password"})
+	second := callJSON(t, handler, http.MethodPost, "/api/auth/register", map[string]string{"email": "second@example.com", "password": "a sufficiently long password"})
+	var firstPayload, secondPayload authPayload
+	decodeResponse(t, first, &firstPayload)
+	decodeResponse(t, second, &secondPayload)
+	created := callJSONWithAccessToken(t, handler, http.MethodPost, "/api/monitors", firstPayload.AccessToken, map[string]any{"url": "https://example.com", "interval_seconds": 60})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create monitor status = %d", created.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/monitors", nil)
+	request.Header.Set("Authorization", "Bearer "+secondPayload.AccessToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var body struct {
+		Monitors []publicMonitor `json:"monitors"`
+	}
+	decodeResponse(t, response, &body)
+	if response.Code != http.StatusOK || len(body.Monitors) != 0 {
+		t.Fatalf("other user's monitors = %#v, status = %d", body.Monitors, response.Code)
 	}
 }
 
@@ -372,7 +413,8 @@ func TestAvatarUploadAndRetrieval(t *testing.T) {
 
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
-	handler, err := New(config.Config{JWTSecret: []byte("01234567890123456789012345678901"), AccessTokenTTL: time.Minute, RefreshTokenTTL: time.Hour, AvatarDir: t.TempDir()}, newMemoryRepository())
+	repository := newMemoryRepository()
+	handler, err := New(config.Config{JWTSecret: []byte("01234567890123456789012345678901"), AccessTokenTTL: time.Minute, RefreshTokenTTL: time.Hour, AvatarDir: t.TempDir()}, repository, repository)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

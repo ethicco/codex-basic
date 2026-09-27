@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"uptime-backend/internal/monitor"
 )
 
 var (
@@ -43,14 +45,6 @@ type Profile struct {
 	UpdatedAt  time.Time
 }
 
-type Monitor struct {
-	ID              string
-	UserID          string
-	TargetURL       string
-	IntervalSeconds int
-	CreatedAt       time.Time
-}
-
 type Repository interface {
 	CreateUserWithSession(ctx context.Context, account User, session Session) error
 	FindByEmail(ctx context.Context, email string) (User, bool, error)
@@ -61,8 +55,6 @@ type Repository interface {
 	FindProfileByUserID(ctx context.Context, userID string) (Profile, bool, error)
 	UpdateProfileName(ctx context.Context, userID, name string) (Profile, error)
 	UpdateProfileAvatar(ctx context.Context, userID, avatarFile string) (Profile, error)
-	CreateMonitor(ctx context.Context, monitor Monitor) error
-	ListMonitorsByUserID(ctx context.Context, userID string) ([]Monitor, error)
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -184,27 +176,55 @@ func (s *Store) UpdateProfileAvatar(ctx context.Context, userID, avatarFile stri
 	return profile, nil
 }
 
-func (s *Store) CreateMonitor(ctx context.Context, monitor Monitor) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO monitors (id, user_id, target_url, interval_seconds, created_at) VALUES ($1, $2, $3, $4, $5)`, monitor.ID, monitor.UserID, monitor.TargetURL, monitor.IntervalSeconds, monitor.CreatedAt)
+func (s *Store) CreateMonitor(ctx context.Context, entry monitor.Monitor) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("begin monitor creation: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, entry.UserID); err != nil {
+		return fmt.Errorf("lock monitor owner: %w", err)
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM monitors WHERE user_id=$1`, entry.UserID).Scan(&count); err != nil {
+		return fmt.Errorf("count monitors: %w", err)
+	}
+	if count >= monitor.MaxPerUser {
+		return monitor.ErrLimitReached
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO monitors (id, user_id, target_url, interval_seconds, created_at) VALUES ($1, $2, $3, $4, $5)`, entry.ID, entry.UserID, entry.TargetURL, entry.IntervalSeconds, entry.CreatedAt); err != nil {
 		return fmt.Errorf("create monitor: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit monitor creation: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) ListMonitorsByUserID(ctx context.Context, userID string) ([]Monitor, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, user_id, target_url, interval_seconds, created_at FROM monitors WHERE user_id=$1 ORDER BY created_at DESC, id DESC`, userID)
+func (s *Store) ListMonitorsByUserID(ctx context.Context, userID string, limit int, cursor *monitor.Cursor) ([]monitor.Monitor, error) {
+	if limit < 1 || limit > monitor.MaxPageSize+1 {
+		limit = monitor.DefaultPageSize
+	}
+	query := `SELECT id, user_id, target_url, interval_seconds, created_at FROM monitors WHERE user_id=$1`
+	args := []any{userID}
+	if cursor != nil {
+		query += ` AND (created_at, id) < ($2, $3)`
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT $` + fmt.Sprint(len(args)+1)
+	args = append(args, limit)
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list monitors: %w", err)
 	}
 	defer rows.Close()
-	monitors := []Monitor{}
+	monitors := []monitor.Monitor{}
 	for rows.Next() {
-		var monitor Monitor
-		if err := rows.Scan(&monitor.ID, &monitor.UserID, &monitor.TargetURL, &monitor.IntervalSeconds, &monitor.CreatedAt); err != nil {
+		var entry monitor.Monitor
+		if err := rows.Scan(&entry.ID, &entry.UserID, &entry.TargetURL, &entry.IntervalSeconds, &entry.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan monitor: %w", err)
 		}
-		monitors = append(monitors, monitor)
+		monitors = append(monitors, entry)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate monitors: %w", err)

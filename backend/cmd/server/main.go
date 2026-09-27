@@ -34,7 +34,8 @@ func main() {
 	if err := database.Migrate(ctx, pool); err != nil {
 		log.Fatal(err)
 	}
-	handler, err := server.New(cfg, user.NewStore(pool))
+	store := user.NewStore(pool)
+	handler, err := server.New(cfg, store, store)
 	if err != nil {
 		log.Fatal(err)
 	}

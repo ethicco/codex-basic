@@ -163,13 +163,21 @@ export async function handleLogout(request: NextRequest) {
 }
 
 export async function handleProfile(request: NextRequest) {
+  return handleAuthorizedJSON(request, "/api/profile", "Некорректные данные профиля");
+}
+
+export async function handleMonitors(request: NextRequest) {
+  return handleAuthorizedJSON(request, "/api/monitors", "Некорректные данные монитора");
+}
+
+async function handleAuthorizedJSON(request: NextRequest, path: "/api/profile" | "/api/monitors", invalidBodyMessage: string) {
   const accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
   if (!accessToken) {
     return NextResponse.json({ error: { code: "unauthenticated", message: "Сессия не найдена" } }, { status: 401 });
   }
   const body = request.method === "GET" ? undefined : await request.json().catch(() => null);
   if (request.method !== "GET" && !body) {
-    return NextResponse.json({ error: { code: "invalid_request", message: "Некорректные данные профиля" } }, { status: 400 });
+    return NextResponse.json({ error: { code: "invalid_request", message: invalidBodyMessage } }, { status: 400 });
   }
   const method = request.method as "GET" | "POST" | "PATCH";
   let result = await backendAuthorizedRequest("/api/profile", method, accessToken, body);
@@ -179,33 +187,6 @@ export async function handleProfile(request: NextRequest) {
     if (refreshedTokens) {
       result = await backendAuthorizedRequest("/api/profile", method, refreshedTokens.access_token, body);
     }
-  }
-  if (!result) return backendError(503, {});
-  if (!result.response.ok) {
-    const response = backendError(result.response.status, result.payload);
-    if (result.response.status === 401) clearAuthCookies(response);
-    return response;
-  }
-  const response = NextResponse.json(result.payload, { status: result.response.status });
-  if (refreshedTokens) setAuthCookies(response, refreshedTokens);
-  return response;
-}
-
-export async function handleMonitors(request: NextRequest) {
-  const accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
-  if (!accessToken) {
-    return NextResponse.json({ error: { code: "unauthenticated", message: "Сессия не найдена" } }, { status: 401 });
-  }
-  const body = request.method === "POST" ? await request.json().catch(() => null) : undefined;
-  if (request.method === "POST" && !body) {
-    return NextResponse.json({ error: { code: "invalid_request", message: "Некорректные данные монитора" } }, { status: 400 });
-  }
-  const method = request.method as "GET" | "POST";
-  let result = await backendAuthorizedRequest("/api/monitors", method, accessToken, body);
-  let refreshedTokens: TokenPayload | null = null;
-  if (result?.response.status === 401) {
-    refreshedTokens = await refreshTokenPair(request);
-    if (refreshedTokens) result = await backendAuthorizedRequest("/api/monitors", method, refreshedTokens.access_token, body);
   }
   if (!result) return backendError(503, {});
   if (!result.response.ok) {
