@@ -43,6 +43,14 @@ type Profile struct {
 	UpdatedAt  time.Time
 }
 
+type Monitor struct {
+	ID              string
+	UserID          string
+	TargetURL       string
+	IntervalSeconds int
+	CreatedAt       time.Time
+}
+
 type Repository interface {
 	CreateUserWithSession(ctx context.Context, account User, session Session) error
 	FindByEmail(ctx context.Context, email string) (User, bool, error)
@@ -53,6 +61,8 @@ type Repository interface {
 	FindProfileByUserID(ctx context.Context, userID string) (Profile, bool, error)
 	UpdateProfileName(ctx context.Context, userID, name string) (Profile, error)
 	UpdateProfileAvatar(ctx context.Context, userID, avatarFile string) (Profile, error)
+	CreateMonitor(ctx context.Context, monitor Monitor) error
+	ListMonitorsByUserID(ctx context.Context, userID string) ([]Monitor, error)
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -172,6 +182,34 @@ func (s *Store) UpdateProfileAvatar(ctx context.Context, userID, avatarFile stri
 		return Profile{}, fmt.Errorf("update profile avatar: %w", err)
 	}
 	return profile, nil
+}
+
+func (s *Store) CreateMonitor(ctx context.Context, monitor Monitor) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO monitors (id, user_id, target_url, interval_seconds, created_at) VALUES ($1, $2, $3, $4, $5)`, monitor.ID, monitor.UserID, monitor.TargetURL, monitor.IntervalSeconds, monitor.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create monitor: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListMonitorsByUserID(ctx context.Context, userID string) ([]Monitor, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, user_id, target_url, interval_seconds, created_at FROM monitors WHERE user_id=$1 ORDER BY created_at DESC, id DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list monitors: %w", err)
+	}
+	defer rows.Close()
+	monitors := []Monitor{}
+	for rows.Next() {
+		var monitor Monitor
+		if err := rows.Scan(&monitor.ID, &monitor.UserID, &monitor.TargetURL, &monitor.IntervalSeconds, &monitor.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan monitor: %w", err)
+		}
+		monitors = append(monitors, monitor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate monitors: %w", err)
+	}
+	return monitors, nil
 }
 
 func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }

@@ -31,10 +31,11 @@ type memoryRepository struct {
 	sessions map[string]user.Session
 	revoked  map[string]bool
 	profiles map[string]user.Profile
+	monitors map[string][]user.Monitor
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{users: map[string]user.User{}, sessions: map[string]user.Session{}, revoked: map[string]bool{}, profiles: map[string]user.Profile{}}
+	return &memoryRepository{users: map[string]user.User{}, sessions: map[string]user.Session{}, revoked: map[string]bool{}, profiles: map[string]user.Profile{}, monitors: map[string][]user.Monitor{}}
 }
 
 func (r *memoryRepository) CreateUserWithSession(_ context.Context, account user.User, session user.Session) error {
@@ -118,6 +119,17 @@ func (r *memoryRepository) UpdateProfileAvatar(_ context.Context, userID, avatar
 	profile.UpdatedAt = time.Now().UTC()
 	r.profiles[userID] = profile
 	return profile, nil
+}
+func (r *memoryRepository) CreateMonitor(_ context.Context, monitor user.Monitor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.monitors[monitor.UserID] = append([]user.Monitor{monitor}, r.monitors[monitor.UserID]...)
+	return nil
+}
+func (r *memoryRepository) ListMonitorsByUserID(_ context.Context, userID string) ([]user.Monitor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]user.Monitor(nil), r.monitors[userID]...), nil
 }
 
 func TestAuthenticationFlow(t *testing.T) {
@@ -253,6 +265,57 @@ func TestProfileLifecycle(t *testing.T) {
 	decodeResponse(t, updated, &body)
 	if body.Profile.Name != "Анна Иванова" {
 		t.Fatalf("updated profile = %#v", body)
+	}
+}
+
+func TestMonitorLifecycle(t *testing.T) {
+	handler := newTestHandler(t)
+	registered := callJSON(t, handler, http.MethodPost, "/api/auth/register", map[string]string{"email": "person@example.com", "password": "a sufficiently long password"})
+	var payload authPayload
+	decodeResponse(t, registered, &payload)
+
+	created := callJSONWithAccessToken(t, handler, http.MethodPost, "/api/monitors", payload.AccessToken, map[string]any{"url": "https://example.com/status", "interval_seconds": 60})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create monitor status = %d, body = %s", created.Code, created.Body.String())
+	}
+	var createdBody struct {
+		Monitor publicMonitor `json:"monitor"`
+	}
+	decodeResponse(t, created, &createdBody)
+	if createdBody.Monitor.ID == "" || createdBody.Monitor.URL != "https://example.com/status" || createdBody.Monitor.IntervalSeconds != 60 {
+		t.Fatalf("created monitor = %#v", createdBody.Monitor)
+	}
+
+	listed := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/monitors", nil)
+	request.Header.Set("Authorization", "Bearer "+payload.AccessToken)
+	handler.ServeHTTP(listed, request)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list monitors status = %d, body = %s", listed.Code, listed.Body.String())
+	}
+	var listedBody struct {
+		Monitors []publicMonitor `json:"monitors"`
+	}
+	decodeResponse(t, listed, &listedBody)
+	if len(listedBody.Monitors) != 1 || listedBody.Monitors[0].ID != createdBody.Monitor.ID {
+		t.Fatalf("listed monitors = %#v", listedBody.Monitors)
+	}
+}
+
+func TestMonitorValidation(t *testing.T) {
+	handler := newTestHandler(t)
+	registered := callJSON(t, handler, http.MethodPost, "/api/auth/register", map[string]string{"email": "person@example.com", "password": "a sufficiently long password"})
+	var payload authPayload
+	decodeResponse(t, registered, &payload)
+	for _, request := range []map[string]any{
+		{"url": "example.com", "interval_seconds": 60},
+		{"url": "ftp://example.com", "interval_seconds": 60},
+		{"url": "https://example.com", "interval_seconds": 30},
+	} {
+		response := callJSONWithAccessToken(t, handler, http.MethodPost, "/api/monitors", payload.AccessToken, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid monitor status = %d, body = %s", response.Code, response.Body.String())
+		}
 	}
 }
 

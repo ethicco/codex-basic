@@ -1,0 +1,29 @@
+.dashboard { display: grid; gap: 24px; }
+.heading { align-items: flex-start; display: flex; gap: 24px; justify-content: space-between; }
+.heading p { color: #1976d2; font-size: 12px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; }
+.heading h1 { font-size: 30px; letter-spacing: -1px; margin-top: 9px; }
+.heading span, .muted { color: #6e7a8d; display: block; margin-top: 11px; }
+.addButton, .createButton, .cancelButton, .closeButton { border: 0; cursor: pointer; font: inherit; font-weight: 700; }
+.addButton, .createButton { background: #1976d2; border-radius: 10px; color: #fff; padding: 12px 17px; }
+.addButton:hover, .createButton:hover { background: #1565b5; }
+.form, .empty, .monitorList { border: 1px solid #e2e7ee; border-radius: 14px; }
+.form { display: grid; gap: 18px; max-width: 580px; padding: 24px; }
+.formHeading { align-items: center; display: flex; justify-content: space-between; }
+.form h2, .empty h2 { font-size: 20px; letter-spacing: -0.4px; }
+.form label { color: #344056; display: grid; font-size: 14px; font-weight: 650; gap: 8px; }
+.form input, .form select { border: 1px solid #cfd7e3; border-radius: 9px; color: #172033; font: inherit; padding: 11px 12px; }
+.form input:focus, .form select:focus { border-color: #1976d2; box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15); outline: none; }
+.closeButton { background: transparent; color: #657083; font-size: 25px; line-height: 1; padding: 3px 6px; }
+.actions { display: flex; gap: 10px; justify-content: flex-end; }
+.cancelButton { background: #edf1f5; border-radius: 10px; color: #344056; padding: 12px 17px; }
+.createButton:disabled { cursor: wait; opacity: 0.65; }
+.error { background: #fff0f0; border-radius: 9px; color: #b42318; font-size: 14px; line-height: 1.4; padding: 10px 12px; }
+.empty { color: #657083; padding: 32px; text-align: center; }
+.empty p { line-height: 1.5; margin: 9px auto 0; max-width: 440px; }
+.monitorList { list-style: none; overflow: hidden; }
+.monitor { align-items: center; display: flex; gap: 20px; justify-content: space-between; padding: 19px 20px; }
+.monitor + .monitor { border-top: 1px solid #edf0f4; }
+.monitor strong { display: block; overflow-wrap: anywhere; }
+.monitor div span { color: #778399; font-size: 13px; margin-top: 6px; }
+.interval { background: #eaf4ff; border-radius: 999px; color: #1976d2; flex: none; font-size: 13px; font-weight: 700; padding: 7px 10px; }
+@media (max-width: 600px) { .heading { align-items: stretch; flex-direction: column; } .addButton { width: 100%; } .monitor { align-items: flex-start; flex-direction: column; gap: 12px; } }

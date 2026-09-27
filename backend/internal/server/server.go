@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,10 @@ type refreshRequest struct {
 type profileRequest struct {
 	Name string `json:"name"`
 }
+type monitorRequest struct {
+	URL             string `json:"url"`
+	IntervalSeconds int    `json:"interval_seconds"`
+}
 type publicUser struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -61,6 +66,12 @@ type publicProfile struct {
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+type publicMonitor struct {
+	ID              string    `json:"id"`
+	URL             string    `json:"url"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func New(cfg config.Config, repository user.Repository) (http.Handler, error) {
@@ -89,7 +100,48 @@ func New(cfg config.Config, repository user.Repository) (http.Handler, error) {
 	mux.HandleFunc("PATCH /api/profile", api.updateProfile)
 	mux.HandleFunc("GET /api/profile/avatar", api.getAvatar)
 	mux.HandleFunc("POST /api/profile/avatar", api.uploadAvatar)
+	mux.HandleFunc("GET /api/monitors", api.listMonitors)
+	mux.HandleFunc("POST /api/monitors", api.createMonitor)
 	return mux, nil
+}
+
+func (a *api) listMonitors(w http.ResponseWriter, r *http.Request) {
+	account, ok := a.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	monitors, err := a.repository.ListMonitorsByUserID(r.Context(), account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not load monitors")
+		return
+	}
+	public := make([]publicMonitor, len(monitors))
+	for i, monitor := range monitors {
+		public[i] = publicMonitorFrom(monitor)
+	}
+	writeJSON(w, http.StatusOK, map[string][]publicMonitor{"monitors": public})
+}
+
+func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
+	account, ok := a.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	request, ok := decodeMonitor(w, r)
+	if !ok {
+		return
+	}
+	id, err := randomID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not create monitor")
+		return
+	}
+	monitor := user.Monitor{ID: id, UserID: account.ID, TargetURL: request.URL, IntervalSeconds: request.IntervalSeconds, CreatedAt: a.now().UTC()}
+	if err := a.repository.CreateMonitor(r.Context(), monitor); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not create monitor")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]publicMonitor{"monitor": publicMonitorFrom(monitor)})
 }
 
 func (a *api) register(w http.ResponseWriter, r *http.Request) {
@@ -424,12 +476,34 @@ func decodeProfile(w http.ResponseWriter, r *http.Request) (profileRequest, bool
 	return request, true
 }
 
+func decodeMonitor(w http.ResponseWriter, r *http.Request) (monitorRequest, bool) {
+	var request monitorRequest
+	if !decodeJSON(w, r, &request) {
+		return monitorRequest{}, false
+	}
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(request.URL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		writeError(w, http.StatusBadRequest, "invalid_url", "url must be an absolute HTTP or HTTPS URL")
+		return monitorRequest{}, false
+	}
+	if request.IntervalSeconds != 5 && request.IntervalSeconds != 60 && request.IntervalSeconds != 3600 {
+		writeError(w, http.StatusBadRequest, "invalid_interval", "interval_seconds must be 5, 60, or 3600")
+		return monitorRequest{}, false
+	}
+	request.URL = parsed.String()
+	return request, true
+}
+
 func publicProfileFrom(profile user.Profile) publicProfile {
 	avatarURL := ""
 	if profile.AvatarFile != "" {
 		avatarURL = "/api/profile/avatar"
 	}
 	return publicProfile{Name: profile.Name, AvatarURL: avatarURL, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}
+}
+
+func publicMonitorFrom(monitor user.Monitor) publicMonitor {
+	return publicMonitor{ID: monitor.ID, URL: monitor.TargetURL, IntervalSeconds: monitor.IntervalSeconds, CreatedAt: monitor.CreatedAt}
 }
 
 func (a *api) newSession(account user.User) (auth.TokenPair, user.Session, error) {

@@ -36,6 +36,8 @@ All endpoints accept `application/json` and return JSON errors in the form
 | GET | `/api/profile` | `Authorization: Bearer <access JWT>` | `200` and profile, or `404` if absent |
 | POST | `/api/profile` | Bearer access token and `{"name":"…"}` | `201` and created profile |
 | PATCH | `/api/profile` | Bearer access token and `{"name":"…"}` | `200` and updated profile |
+| GET | `/api/monitors` | Bearer access token | `200` and the current user's monitors |
+| POST | `/api/monitors` | Bearer access token and `{"url":"https://example.com","interval_seconds":60}` | `201` and created monitor |
 
 A token response contains `user`, `access_token`, `refresh_token`,
 `token_type` (`Bearer`), and `expires_in`. Each refresh rotates the stored

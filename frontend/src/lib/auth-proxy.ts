@@ -191,6 +191,33 @@ export async function handleProfile(request: NextRequest) {
   return response;
 }
 
+export async function handleMonitors(request: NextRequest) {
+  const accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
+  if (!accessToken) {
+    return NextResponse.json({ error: { code: "unauthenticated", message: "Сессия не найдена" } }, { status: 401 });
+  }
+  const body = request.method === "POST" ? await request.json().catch(() => null) : undefined;
+  if (request.method === "POST" && !body) {
+    return NextResponse.json({ error: { code: "invalid_request", message: "Некорректные данные монитора" } }, { status: 400 });
+  }
+  const method = request.method as "GET" | "POST";
+  let result = await backendAuthorizedRequest("/api/monitors", method, accessToken, body);
+  let refreshedTokens: TokenPayload | null = null;
+  if (result?.response.status === 401) {
+    refreshedTokens = await refreshTokenPair(request);
+    if (refreshedTokens) result = await backendAuthorizedRequest("/api/monitors", method, refreshedTokens.access_token, body);
+  }
+  if (!result) return backendError(503, {});
+  if (!result.response.ok) {
+    const response = backendError(result.response.status, result.payload);
+    if (result.response.status === 401) clearAuthCookies(response);
+    return response;
+  }
+  const response = NextResponse.json(result.payload, { status: result.response.status });
+  if (refreshedTokens) setAuthCookies(response, refreshedTokens);
+  return response;
+}
+
 export async function handleAvatar(request: NextRequest) {
   const accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
   if (!accessToken) {
