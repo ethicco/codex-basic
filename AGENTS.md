@@ -27,6 +27,15 @@ Details in file: docs/rules/github-flow.md
 
 Keep secrets and local configuration out of Git; use environment variables and document required names in the relevant README. Review dependency-lockfile changes carefully, and never expose credentials in client-side code or committed logs.
 
-## Коммиты
+## API documentation
 
-Use rules in file: docs/rules/commit.md
+- When adding or changing an HTTP route in `backend/`, update its Swaggo annotations, including request parameters, request bodies, successful responses, and documented error responses.
+- After changing routes or their API annotations, regenerate and commit the OpenAPI contract and ReDoc HTML with `cd backend && make openapi-docs`.
+
+## Комментарии в коде
+
+- Комментируй ПОЧЕМУ, а не ЧТО - "что" видно из кода
+- Очевидное не комментируй, лучше используй правильные наименования
+- Публичные функции - doc comment: что делает, что возвращает, когда ошибка, как ведёт себя с context
+- Сложную арифметику поясняй причиной, а не пересказом
+- Меняешь код, актуализируй комментарий
