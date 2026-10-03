@@ -1,0 +1,553 @@
+basePath: /
+consumes:
+- application/json
+definitions:
+  server.credentialsRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    type: object
+  server.errorDetail:
+    properties:
+      code:
+        example: invalid_request
+        type: string
+      message:
+        example: request body must be valid JSON
+        type: string
+    type: object
+  server.errorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/server.errorDetail'
+    type: object
+  server.monitorListResponse:
+    properties:
+      monitors:
+        items:
+          $ref: '#/definitions/server.publicMonitor'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  server.monitorRequest:
+    properties:
+      interval_seconds:
+        type: integer
+      url:
+        type: string
+    type: object
+  server.monitorResponse:
+    properties:
+      monitor:
+        $ref: '#/definitions/server.publicMonitor'
+    type: object
+  server.profileRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  server.profileResponse:
+    properties:
+      profile:
+        $ref: '#/definitions/server.publicProfile'
+    type: object
+  server.publicMonitor:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      interval_seconds:
+        type: integer
+      url:
+        type: string
+    type: object
+  server.publicProfile:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  server.publicUser:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+    type: object
+  server.refreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    type: object
+  server.tokenResponseEnvelope:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        example: 900
+        type: integer
+      refresh_token:
+        type: string
+      token_type:
+        example: Bearer
+        type: string
+      user:
+        $ref: '#/definitions/server.publicUser'
+    type: object
+  server.userResponse:
+    properties:
+      user:
+        $ref: '#/definitions/server.publicUser'
+    type: object
+info:
+  contact: {}
+  description: HTTP API for managing user accounts, profiles, and uptime monitors.
+  title: Uptime API
+  version: "1.0"
+paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Account credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/server.credentialsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.tokenResponseEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      summary: Log in
+      tags:
+      - authentication
+  /api/auth/logout:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh token
+        in: body
+        name: refresh
+        required: true
+        schema:
+          $ref: '#/definitions/server.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      summary: Log out
+      tags:
+      - authentication
+  /api/auth/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.userResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get current account
+      tags:
+      - authentication
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh token
+        in: body
+        name: refresh
+        required: true
+        schema:
+          $ref: '#/definitions/server.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.tokenResponseEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      summary: Refresh tokens
+      tags:
+      - authentication
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Account credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/server.credentialsRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/server.tokenResponseEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      summary: Register account
+      tags:
+      - authentication
+  /api/monitors:
+    get:
+      parameters:
+      - default: 50
+        description: Page size
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      - description: Cursor returned by the previous page
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.monitorListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List monitors
+      tags:
+      - monitors
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Monitor settings
+        in: body
+        name: monitor
+        required: true
+        schema:
+          $ref: '#/definitions/server.monitorRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/server.monitorResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create monitor
+      tags:
+      - monitors
+  /api/profile:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get profile
+      tags:
+      - profile
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Profile data
+        in: body
+        name: profile
+        required: true
+        schema:
+          $ref: '#/definitions/server.profileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update profile
+      tags:
+      - profile
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Profile data
+        in: body
+        name: profile
+        required: true
+        schema:
+          $ref: '#/definitions/server.profileRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create profile
+      tags:
+      - profile
+  /api/profile/avatar:
+    get:
+      produces:
+      - image/jpeg
+      - image/png
+      - image/gif
+      - image/webp
+      responses:
+        "200":
+          description: Avatar image
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get avatar
+      tags:
+      - profile
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Avatar image (JPEG, PNG, GIF, or WebP; maximum 5 MB)
+        in: formData
+        name: avatar
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload avatar
+      tags:
+      - profile
+produces:
+- application/json
+schemes:
+- http
+securityDefinitions:
+  BearerAuth:
+    description: 'Use a bearer access token: `Bearer {accessToken}`.'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

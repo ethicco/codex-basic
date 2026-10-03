@@ -12,6 +12,10 @@ go run ./cmd/server
 ```
 
 The service applies embedded SQL migrations at startup and listens on `:8080`.
+Swagger UI is available at `http://localhost:8080/swagger/index.html`; the
+generated OpenAPI 2.0 contract is stored in `docs/swagger.json` and
+`docs/swagger.yaml`. Regenerate it after API changes with `go generate ./...`.
+To regenerate the contract and standalone ReDoc HTML, run `make openapi-docs`.
 
 | Variable | Default | Description |
 | --- | --- | --- |

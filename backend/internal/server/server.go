@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swaggo/http-swagger"
+
 	"uptime-backend/internal/auth"
 	"uptime-backend/internal/config"
 	"uptime-backend/internal/monitor"
@@ -76,6 +78,34 @@ type publicMonitor struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type errorDetail struct {
+	Code    string `json:"code" example:"invalid_request"`
+	Message string `json:"message" example:"request body must be valid JSON"`
+}
+type errorResponse struct {
+	Error errorDetail `json:"error"`
+}
+type tokenResponseEnvelope struct {
+	User         publicUser `json:"user"`
+	AccessToken  string     `json:"access_token"`
+	RefreshToken string     `json:"refresh_token"`
+	TokenType    string     `json:"token_type" example:"Bearer"`
+	ExpiresIn    int64      `json:"expires_in" example:"900"`
+}
+type userResponse struct {
+	User publicUser `json:"user"`
+}
+type profileResponse struct {
+	Profile publicProfile `json:"profile"`
+}
+type monitorResponse struct {
+	Monitor publicMonitor `json:"monitor"`
+}
+type monitorListResponse struct {
+	Monitors   []publicMonitor `json:"monitors"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
 func New(cfg config.Config, repository user.Repository, monitors monitor.Repository) (http.Handler, error) {
 	if repository == nil {
 		return nil, errors.New("user repository is required")
@@ -107,9 +137,22 @@ func New(cfg config.Config, repository user.Repository, monitors monitor.Reposit
 	mux.HandleFunc("POST /api/profile/avatar", api.uploadAvatar)
 	mux.HandleFunc("GET /api/monitors", api.listMonitors)
 	mux.HandleFunc("POST /api/monitors", api.createMonitor)
+	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)
 	return mux, nil
 }
 
+// listMonitors returns a cursor-paginated list of the authenticated user's monitors.
+// @Summary List monitors
+// @Tags monitors
+// @Produce json
+// @Security BearerAuth
+// @Param limit query int false "Page size" minimum(1) maximum(100) default(50)
+// @Param cursor query string false "Cursor returned by the previous page"
+// @Success 200 {object} monitorListResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/monitors [get]
 func (a *api) listMonitors(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -142,6 +185,19 @@ func (a *api) listMonitors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// createMonitor creates an uptime monitor for the authenticated user.
+// @Summary Create monitor
+// @Tags monitors
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param monitor body monitorRequest true "Monitor settings"
+// @Success 201 {object} monitorResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 429 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/monitors [post]
 func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -168,6 +224,18 @@ func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]publicMonitor{"monitor": publicMonitorFrom(entry)})
 }
 
+// register creates an account and returns an access and refresh token pair.
+// @Summary Register account
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param credentials body credentialsRequest true "Account credentials"
+// @Success 201 {object} tokenResponseEnvelope
+// @Failure 400 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/auth/register [post]
 func (a *api) register(w http.ResponseWriter, r *http.Request) {
 	request, ok := decodeCredentials(w, r)
 	if !ok {
@@ -205,6 +273,18 @@ func (a *api) register(w http.ResponseWriter, r *http.Request) {
 	a.writeTokenResponse(w, http.StatusCreated, account, pair)
 }
 
+// login authenticates an account and returns an access and refresh token pair.
+// @Summary Log in
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param credentials body credentialsRequest true "Account credentials"
+// @Success 200 {object} tokenResponseEnvelope
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/auth/login [post]
 func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	request, ok := decodeCredentials(w, r)
 	if !ok {
@@ -236,6 +316,18 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	a.writeTokenResponse(w, http.StatusOK, account, pair)
 }
 
+// refresh exchanges a valid refresh token for a new access and refresh token pair.
+// @Summary Refresh tokens
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param refresh body refreshRequest true "Refresh token"
+// @Success 200 {object} tokenResponseEnvelope
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/auth/refresh [post]
 func (a *api) refresh(w http.ResponseWriter, r *http.Request) {
 	request, ok := decodeRefresh(w, r)
 	if !ok {
@@ -268,6 +360,18 @@ func (a *api) refresh(w http.ResponseWriter, r *http.Request) {
 	a.writeTokenResponse(w, http.StatusOK, account, pair)
 }
 
+// logout revokes the session identified by a valid refresh token.
+// @Summary Log out
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param refresh body refreshRequest true "Refresh token"
+// @Success 204
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/auth/logout [post]
 func (a *api) logout(w http.ResponseWriter, r *http.Request) {
 	request, ok := decodeRefresh(w, r)
 	if !ok {
@@ -289,6 +393,15 @@ func (a *api) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// me returns the authenticated account's public data.
+// @Summary Get current account
+// @Tags authentication
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} userResponse
+// @Failure 401 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/auth/me [get]
 func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -299,6 +412,16 @@ func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getProfile returns the authenticated user's profile.
+// @Summary Get profile
+// @Tags profile
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} profileResponse
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/profile [get]
 func (a *api) getProfile(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -316,6 +439,20 @@ func (a *api) getProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]publicProfile{"profile": publicProfileFrom(profile)})
 }
 
+// createProfile creates the authenticated user's profile.
+// @Summary Create profile
+// @Tags profile
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param profile body profileRequest true "Profile data"
+// @Success 201 {object} profileResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/profile [post]
 func (a *api) createProfile(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -338,6 +475,20 @@ func (a *api) createProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]publicProfile{"profile": publicProfileFrom(profile)})
 }
 
+// updateProfile changes the authenticated user's profile name.
+// @Summary Update profile
+// @Tags profile
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param profile body profileRequest true "Profile data"
+// @Success 200 {object} profileResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/profile [patch]
 func (a *api) updateProfile(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -359,6 +510,20 @@ func (a *api) updateProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]publicProfile{"profile": publicProfileFrom(profile)})
 }
 
+// uploadAvatar stores an image avatar for the authenticated user's profile.
+// @Summary Upload avatar
+// @Tags profile
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param avatar formData file true "Avatar image (JPEG, PNG, GIF, or WebP; maximum 5 MB)"
+// @Success 200 {object} profileResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 415 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/profile/avatar [post]
 func (a *api) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {
@@ -423,6 +588,16 @@ func (a *api) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]publicProfile{"profile": publicProfileFrom(updated)})
 }
 
+// getAvatar returns the authenticated user's avatar image.
+// @Summary Get avatar
+// @Tags profile
+// @Produce image/jpeg,image/png,image/gif,image/webp
+// @Security BearerAuth
+// @Success 200 {file} file "Avatar image"
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/profile/avatar [get]
 func (a *api) getAvatar(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.authenticatedUser(w, r)
 	if !ok {

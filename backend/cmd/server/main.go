@@ -11,12 +11,26 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	_ "uptime-backend/docs"
 	"uptime-backend/internal/config"
 	"uptime-backend/internal/database"
 	"uptime-backend/internal/server"
 	"uptime-backend/internal/user"
 )
 
+// @title Uptime API
+// @version 1.0
+// @description HTTP API for managing user accounts, profiles, and uptime monitors.
+// @BasePath /
+// @schemes http
+// @accept json
+// @produce json
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Use a bearer access token: `Bearer {accessToken}`.
+//
+//go:generate go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo main.go --dir .,../../internal/server --output ../../docs --parseInternal
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
