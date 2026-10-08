@@ -3,7 +3,7 @@
 .heading p { color: #1976d2; font-size: 12px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; }
 .heading h1 { font-size: 30px; letter-spacing: -1px; margin-top: 9px; }
 .heading span, .muted { color: #6e7a8d; display: block; margin-top: 11px; }
-.addButton, .createButton, .cancelButton, .closeButton { border: 0; cursor: pointer; font: inherit; font-weight: 700; }
+.addButton, .createButton, .cancelButton, .closeButton, .editButton, .deleteButton { border: 0; cursor: pointer; font: inherit; font-weight: 700; }
 .addButton, .createButton { background: #1976d2; border-radius: 10px; color: #fff; padding: 12px 17px; }
 .addButton:hover, .createButton:hover { background: #1565b5; }
 .form, .empty, .monitorList { border: 1px solid #e2e7ee; border-radius: 14px; }
@@ -16,7 +16,7 @@
 .closeButton { background: transparent; color: #657083; font-size: 25px; line-height: 1; padding: 3px 6px; }
 .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .cancelButton { background: #edf1f5; border-radius: 10px; color: #344056; padding: 12px 17px; }
-.createButton:disabled { cursor: wait; opacity: 0.65; }
+.addButton:disabled, .createButton:disabled, .cancelButton:disabled, .closeButton:disabled, .editButton:disabled, .deleteButton:disabled { cursor: wait; opacity: 0.65; }
 .loadMoreButton { background: #edf1f5; border: 0; border-radius: 10px; color: #344056; cursor: pointer; font: inherit; font-weight: 700; justify-self: center; padding: 12px 17px; }
 .loadMoreButton:disabled { cursor: wait; opacity: 0.65; }
 .error { background: #fff0f0; border-radius: 9px; color: #b42318; font-size: 14px; line-height: 1.4; padding: 10px 12px; }
@@ -28,4 +28,10 @@
 .monitor strong { display: block; overflow-wrap: anywhere; }
 .monitor div span { color: #778399; font-size: 13px; margin-top: 6px; }
 .interval { background: #eaf4ff; border-radius: 999px; color: #1976d2; flex: none; font-size: 13px; font-weight: 700; padding: 7px 10px; }
-@media (max-width: 600px) { .heading { align-items: stretch; flex-direction: column; } .addButton { width: 100%; } .monitor { align-items: flex-start; flex-direction: column; gap: 12px; } }
+.monitorActions { align-items: center; display: flex; flex: none; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.editButton, .deleteButton { background: transparent; border-radius: 8px; padding: 8px 10px; }
+.editButton { color: #1976d2; }
+.editButton:hover { background: #eaf4ff; }
+.deleteButton { color: #b42318; }
+.deleteButton:hover { background: #fff0f0; }
+@media (max-width: 600px) { .heading { align-items: stretch; flex-direction: column; } .addButton { width: 100%; } .monitor { align-items: flex-start; flex-direction: column; gap: 12px; } .monitorActions { justify-content: flex-start; } }

@@ -232,6 +232,46 @@ func (s *Store) ListMonitorsByUserID(ctx context.Context, userID string, limit i
 	return monitors, nil
 }
 
+// UpdateMonitor replaces the target settings of a monitor owned by its user.
+// It returns monitor.ErrNotFound when the monitor does not belong to the user.
+func (s *Store) UpdateMonitor(ctx context.Context, settings monitor.Monitor) (monitor.Monitor, error) {
+	var entry monitor.Monitor
+	err := s.pool.QueryRow(
+		ctx,
+		`UPDATE monitors SET target_url=$1, interval_seconds=$2 WHERE id=$3 AND user_id=$4 RETURNING id, user_id, target_url, interval_seconds, created_at`,
+		settings.TargetURL,
+		settings.IntervalSeconds,
+		settings.ID,
+		settings.UserID,
+	).Scan(
+		&entry.ID,
+		&entry.UserID,
+		&entry.TargetURL,
+		&entry.IntervalSeconds,
+		&entry.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitor.Monitor{}, monitor.ErrNotFound
+	}
+	if err != nil {
+		return monitor.Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
+	return entry, nil
+}
+
+// DeleteMonitor permanently deletes a monitor owned by its user.
+// It returns monitor.ErrNotFound when the monitor does not belong to the user.
+func (s *Store) DeleteMonitor(ctx context.Context, userID, id string) error {
+	commandTag, err := s.pool.Exec(ctx, `DELETE FROM monitors WHERE id=$1 AND user_id=$2`, id, userID)
+	if err != nil {
+		return fmt.Errorf("delete monitor: %w", err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return monitor.ErrNotFound
+	}
+	return nil
+}
+
 func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 func isUniqueViolation(err error) bool {

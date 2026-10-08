@@ -53,7 +53,9 @@ async function backendSessionRequest(accessToken: string) {
   }
 }
 
-async function backendAuthorizedRequest(path: string, method: "GET" | "POST" | "PATCH", accessToken: string, body?: unknown) {
+type AuthorizedMethod = "GET" | "POST" | "PATCH" | "DELETE";
+
+async function backendAuthorizedRequest(path: string, method: AuthorizedMethod, accessToken: string, body?: unknown) {
   try {
     const response = await fetch(`${backendURL}${path}`, {
       method,
@@ -166,26 +168,28 @@ export async function handleProfile(request: NextRequest) {
   return handleAuthorizedJSON(request, "/api/profile", "Некорректные данные профиля");
 }
 
-export async function handleMonitors(request: NextRequest) {
-  return handleAuthorizedJSON(request, "/api/monitors", "Некорректные данные монитора");
+export async function handleMonitors(request: NextRequest, path = "/api/monitors") {
+  const backendPath = path === "/api/monitors" ? `${path}${request.nextUrl.search}` : path;
+  return handleAuthorizedJSON(request, backendPath, "Некорректные данные монитора");
 }
 
-async function handleAuthorizedJSON(request: NextRequest, path: "/api/profile" | "/api/monitors", invalidBodyMessage: string) {
+async function handleAuthorizedJSON(request: NextRequest, path: string, invalidBodyMessage: string) {
   const accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
   if (!accessToken) {
     return NextResponse.json({ error: { code: "unauthenticated", message: "Сессия не найдена" } }, { status: 401 });
   }
-  const body = request.method === "GET" ? undefined : await request.json().catch(() => null);
-  if (request.method !== "GET" && !body) {
+  const hasBody = request.method !== "GET" && request.method !== "DELETE";
+  const body = hasBody ? await request.json().catch(() => null) : undefined;
+  if (hasBody && !body) {
     return NextResponse.json({ error: { code: "invalid_request", message: invalidBodyMessage } }, { status: 400 });
   }
-  const method = request.method as "GET" | "POST" | "PATCH";
-  let result = await backendAuthorizedRequest("/api/profile", method, accessToken, body);
+  const method = request.method as AuthorizedMethod;
+  let result = await backendAuthorizedRequest(path, method, accessToken, body);
   let refreshedTokens: TokenPayload | null = null;
   if (result?.response.status === 401) {
     refreshedTokens = await refreshTokenPair(request);
     if (refreshedTokens) {
-      result = await backendAuthorizedRequest("/api/profile", method, refreshedTokens.access_token, body);
+      result = await backendAuthorizedRequest(path, method, refreshedTokens.access_token, body);
     }
   }
   if (!result) return backendError(503, {});
@@ -194,7 +198,9 @@ async function handleAuthorizedJSON(request: NextRequest, path: "/api/profile" |
     if (result.response.status === 401) clearAuthCookies(response);
     return response;
   }
-  const response = NextResponse.json(result.payload, { status: result.response.status });
+  const response = result.response.status === 204
+    ? new NextResponse(null, { status: 204 })
+    : NextResponse.json(result.payload, { status: result.response.status });
   if (refreshedTokens) setAuthCookies(response, refreshedTokens);
   return response;
 }
