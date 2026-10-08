@@ -16,7 +16,10 @@ const (
 	MaxPageSize     = 100
 )
 
-var ErrLimitReached = errors.New("monitor limit reached")
+var (
+	ErrLimitReached = errors.New("monitor limit reached")
+	ErrNotFound     = errors.New("monitor not found")
+)
 
 type Monitor struct {
 	ID              string
@@ -34,6 +37,8 @@ type Cursor struct {
 type Repository interface {
 	CreateMonitor(ctx context.Context, monitor Monitor) error
 	ListMonitorsByUserID(ctx context.Context, userID string, limit int, cursor *Cursor) ([]Monitor, error)
+	UpdateMonitor(ctx context.Context, monitor Monitor) (Monitor, error)
+	DeleteMonitor(ctx context.Context, userID, id string) error
 }
 
 // ValidateTargetURL accepts only canonical HTTP(S) URLs. It rejects literal

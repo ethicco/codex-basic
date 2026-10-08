@@ -147,6 +147,32 @@ func (r *memoryRepository) ListMonitorsByUserID(_ context.Context, userID string
 	}
 	return entries, nil
 }
+func (r *memoryRepository) UpdateMonitor(_ context.Context, updated monitor.Monitor) (monitor.Monitor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index, entry := range r.monitors[updated.UserID] {
+		if entry.ID != updated.ID {
+			continue
+		}
+		entry.TargetURL = updated.TargetURL
+		entry.IntervalSeconds = updated.IntervalSeconds
+		r.monitors[updated.UserID][index] = entry
+		return entry, nil
+	}
+	return monitor.Monitor{}, monitor.ErrNotFound
+}
+func (r *memoryRepository) DeleteMonitor(_ context.Context, userID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index, entry := range r.monitors[userID] {
+		if entry.ID != id {
+			continue
+		}
+		r.monitors[userID] = append(r.monitors[userID][:index], r.monitors[userID][index+1:]...)
+		return nil
+	}
+	return monitor.ErrNotFound
+}
 
 func TestAuthenticationFlow(t *testing.T) {
 	handler := newTestHandler(t)
@@ -316,10 +342,43 @@ func TestMonitorLifecycle(t *testing.T) {
 	if len(listedBody.Monitors) != 1 || listedBody.Monitors[0].ID != createdBody.Monitor.ID {
 		t.Fatalf("listed monitors = %#v", listedBody.Monitors)
 	}
+
+	updated := callJSONWithAccessToken(t, handler, http.MethodPatch, "/api/monitors/"+createdBody.Monitor.ID, payload.AccessToken, map[string]any{"url": "https://example.org/health", "interval_seconds": 3600})
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update monitor status = %d, body = %s", updated.Code, updated.Body.String())
+	}
+	var updatedBody struct {
+		Monitor publicMonitor `json:"monitor"`
+	}
+	decodeResponse(t, updated, &updatedBody)
+	if updatedBody.Monitor.URL != "https://example.org/health" || updatedBody.Monitor.IntervalSeconds != 3600 || updatedBody.Monitor.CreatedAt != createdBody.Monitor.CreatedAt {
+		t.Fatalf("updated monitor = %#v", updatedBody.Monitor)
+	}
+
+	deleted := callJSONWithAccessToken(t, handler, http.MethodDelete, "/api/monitors/"+createdBody.Monitor.ID, payload.AccessToken, nil)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete monitor status = %d, body = %s", deleted.Code, deleted.Body.String())
+	}
+	listed = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/monitors", nil)
+	request.Header.Set("Authorization", "Bearer "+payload.AccessToken)
+	handler.ServeHTTP(listed, request)
+	decodeResponse(t, listed, &listedBody)
+	if len(listedBody.Monitors) != 0 {
+		t.Fatalf("monitors after deletion = %#v", listedBody.Monitors)
+	}
 }
 
 func TestMonitorValidation(t *testing.T) {
 	handler := newTestHandler(t)
+	unauthenticated := callJSON(t, handler, http.MethodPatch, "/api/monitors/missing", map[string]any{"url": "https://example.com", "interval_seconds": 60})
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated monitor update status = %d", unauthenticated.Code)
+	}
+	unauthenticated = callJSON(t, handler, http.MethodDelete, "/api/monitors/missing", nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated monitor deletion status = %d", unauthenticated.Code)
+	}
 	registered := callJSON(t, handler, http.MethodPost, "/api/auth/register", map[string]string{"email": "person@example.com", "password": "a sufficiently long password"})
 	var payload authPayload
 	decodeResponse(t, registered, &payload)
@@ -333,6 +392,15 @@ func TestMonitorValidation(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("invalid monitor status = %d, body = %s", response.Code, response.Body.String())
 		}
+	}
+	created := callJSONWithAccessToken(t, handler, http.MethodPost, "/api/monitors", payload.AccessToken, map[string]any{"url": "https://example.com", "interval_seconds": 60})
+	var createdBody struct {
+		Monitor publicMonitor `json:"monitor"`
+	}
+	decodeResponse(t, created, &createdBody)
+	updated := callJSONWithAccessToken(t, handler, http.MethodPatch, "/api/monitors/"+createdBody.Monitor.ID, payload.AccessToken, map[string]any{"url": "https://example.com", "interval_seconds": 30})
+	if updated.Code != http.StatusBadRequest {
+		t.Fatalf("invalid monitor update status = %d, body = %s", updated.Code, updated.Body.String())
 	}
 }
 
@@ -357,6 +425,18 @@ func TestMonitorListDoesNotExposeOtherUsersData(t *testing.T) {
 	decodeResponse(t, response, &body)
 	if response.Code != http.StatusOK || len(body.Monitors) != 0 {
 		t.Fatalf("other user's monitors = %#v, status = %d", body.Monitors, response.Code)
+	}
+	var createdBody struct {
+		Monitor publicMonitor `json:"monitor"`
+	}
+	decodeResponse(t, created, &createdBody)
+	updated := callJSONWithAccessToken(t, handler, http.MethodPatch, "/api/monitors/"+createdBody.Monitor.ID, secondPayload.AccessToken, map[string]any{"url": "https://example.org", "interval_seconds": 60})
+	if updated.Code != http.StatusNotFound {
+		t.Fatalf("other user's update status = %d", updated.Code)
+	}
+	deleted := callJSONWithAccessToken(t, handler, http.MethodDelete, "/api/monitors/"+createdBody.Monitor.ID, secondPayload.AccessToken, nil)
+	if deleted.Code != http.StatusNotFound {
+		t.Fatalf("other user's delete status = %d", deleted.Code)
 	}
 }
 
