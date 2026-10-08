@@ -14,7 +14,7 @@ Use the range supplied by the user. For a feature branch, compare it with `main`
 Before inspecting the diff, run:
 
 ```bash
-.codex/skills/code-review/scripts/run-static-checks.sh "<base>...<head>"
+.agents/skills/code-review/scripts/run-static-checks.sh "<base>...<head>"
 ```
 
 Omit the argument for the current working tree. The script runs checks only for applications whose files occur in the selected diff. Report its results even when a check fails; continue the review unless the diff cannot be read.

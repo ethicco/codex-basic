@@ -12,7 +12,7 @@ For every affected handler, update its Swaggo annotations to describe the implem
 After changing a route or its annotations, run:
 
 ```bash
-.codex/skills/openapi-routes/scripts/sync-openapi.sh
+.agents/skills/openapi-routes/scripts/sync-openapi.sh
 ```
 
 The script regenerates the Swaggo contract and then builds ReDoc from the new `swagger.yaml`.
