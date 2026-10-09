@@ -73,4 +73,19 @@ func TestStorePersistsUsersAndRefreshSessionLifecycle(t *testing.T) {
 	if err != nil || len(page) != 1 || page[0].ID != first.ID {
 		t.Fatalf("ListMonitorsByUserID(cursor) = %#v, %v", page, err)
 	}
+	updated, err := store.UpdateMonitor(ctx, monitor.Monitor{
+		ID:              first.ID,
+		UserID:          account.ID,
+		TargetURL:       "https://example.net/health",
+		IntervalSeconds: 3600,
+	})
+	if err != nil || updated.TargetURL != "https://example.net/health" || updated.IntervalSeconds != 3600 {
+		t.Fatalf("UpdateMonitor() = %#v, %v", updated, err)
+	}
+	if err := store.DeleteMonitor(ctx, account.ID, second.ID); err != nil {
+		t.Fatalf("DeleteMonitor() error = %v", err)
+	}
+	if err := store.DeleteMonitor(ctx, account.ID, second.ID); !errors.Is(err, monitor.ErrNotFound) {
+		t.Fatalf("repeated DeleteMonitor() error = %v", err)
+	}
 }

@@ -137,6 +137,8 @@ func New(cfg config.Config, repository user.Repository, monitors monitor.Reposit
 	mux.HandleFunc("POST /api/profile/avatar", api.uploadAvatar)
 	mux.HandleFunc("GET /api/monitors", api.listMonitors)
 	mux.HandleFunc("POST /api/monitors", api.createMonitor)
+	mux.HandleFunc("PATCH /api/monitors/{id}", api.updateMonitor)
+	mux.HandleFunc("DELETE /api/monitors/{id}", api.deleteMonitor)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)
 	return mux, nil
 }
@@ -222,6 +224,72 @@ func (a *api) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]publicMonitor{"monitor": publicMonitorFrom(entry)})
+}
+
+// updateMonitor updates an uptime monitor owned by the authenticated user.
+// @Summary Update monitor
+// @Tags monitors
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Monitor ID"
+// @Param monitor body monitorRequest true "Monitor settings"
+// @Success 200 {object} monitorResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/monitors/{id} [patch]
+func (a *api) updateMonitor(w http.ResponseWriter, r *http.Request) {
+	account, ok := a.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	request, ok := decodeMonitor(w, r)
+	if !ok {
+		return
+	}
+	entry, err := a.monitors.UpdateMonitor(r.Context(), monitor.Monitor{
+		ID:              r.PathValue("id"),
+		UserID:          account.ID,
+		TargetURL:       request.URL,
+		IntervalSeconds: request.IntervalSeconds,
+	})
+	if errors.Is(err, monitor.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "monitor_not_found", "monitor was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not update monitor")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]publicMonitor{"monitor": publicMonitorFrom(entry)})
+}
+
+// deleteMonitor permanently deletes an uptime monitor owned by the authenticated user.
+// @Summary Delete monitor
+// @Tags monitors
+// @Security BearerAuth
+// @Param id path string true "Monitor ID"
+// @Success 204
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/monitors/{id} [delete]
+func (a *api) deleteMonitor(w http.ResponseWriter, r *http.Request) {
+	account, ok := a.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if err := a.monitors.DeleteMonitor(r.Context(), account.ID, r.PathValue("id")); err != nil {
+		if errors.Is(err, monitor.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "monitor_not_found", "monitor was not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not delete monitor")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // register creates an account and returns an access and refresh token pair.
