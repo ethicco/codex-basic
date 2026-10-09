@@ -6,6 +6,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": ".codex/hooks/eslint.sh"
+          },
+          {
+            "type": "command",
             "command": ".codex/hooks/gofmt.sh"
           }
         ]
